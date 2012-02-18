@@ -1,0 +1,20 @@
+cs213a project
+
+EyeRobot
+
+Jonathan Chu
+Siyin Yang
+
+Hardware Components
+
+iRobot Create
+mbed
+Disto OEM Module 3.0
+Foscam FI8918W
+generic wireless router
+generic laptop
+
+Software Components
+
+perl/python
+mbed C
