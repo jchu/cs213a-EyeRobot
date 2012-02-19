@@ -30,7 +30,11 @@ $oem->off();
 
 sub check_status {
     my $dist = $oem->measure_distance();
-    warn $app->current_time . ": $dist\n";
+    if ($dist) {
+        warn $app->current_time . ": $dist\n";
+    } else {
+        warn "error: " . $oem->error() . "\n";
+    }
 }
 
 sub init_components {
