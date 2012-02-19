@@ -52,7 +52,7 @@ sub init_components {
             comm_class => 'OEMModule3::Telnet',
             server_name => $ENV{EYEROBOT_TELNET},
             server_port => 2000,
-            comm => $telnet
+            comm => $oem_telnet
         });
     $oem->on();
 }
