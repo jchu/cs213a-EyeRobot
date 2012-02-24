@@ -21,6 +21,8 @@ my $MAX_DISTANCE_SKEW = 10; # mm
 my $DISTANCE_SKEW_LIMIT = 100; # mm
 my $FORWARD_SPEED = 258; # mm/s
 
+my $checkpoint_script = '/usr/bin/python script.py';
+
 my $oem;
 my $robot;
 my $state;
@@ -109,7 +111,9 @@ sub check_status {
             $state->{action} = 'STOP';
             move();
             sleep(1);
-            exit(0);
+            if( system($checkpoint_script) ) {
+                die 'checkpoint script exited with error';
+            }
         }
 
 
@@ -134,6 +138,7 @@ sub check_status {
                 warn "Drop off detected";
                 # turn_left();
         #    recenter_robot();
+            }
         }
     } else {
         warn "error: " . $oem->error() . "\n";
