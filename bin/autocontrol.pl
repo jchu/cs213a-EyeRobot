@@ -17,11 +17,27 @@ use SDL::Event;
 use SDLx::App;
 use SDLx::Controller;
 
-my $MAX_DISTANCE_SKEW = 10; # mm
-my $DISTANCE_SKEW_LIMIT = 100; # mm
-my $FORWARD_SPEED = 258; # mm/s
+#-------------------------------------------------
+# Variables
+#-------------------------------------------------
 
-my $checkpoint_script = '/usr/bin/python script.py';
+my $MAX_DISTANCE_SKEW   = 10; # mm
+my $DISTANCE_SKEW_LIMIT = 100; # mm
+my $FORWARD_SPEED       = 258; # mm/s
+
+my %STATES = (
+    STOP    => 0,
+    MOVE    => 1,
+    TURN    => 2
+);
+
+my %ACTIONS = (
+    STOP            => 0,
+    MOVE_FORWARD    => 1,
+    CHECKPOINT      => 2
+);
+
+my $checkpoint_script = '/bin/sh checkpoint_script.sh';
 
 my $oem;
 my $robot;
@@ -36,6 +52,15 @@ my $app = SDLx::Controller->new(
 $app->add_move_handler(\&check_status);
 $app->add_move_handler(\&move);
 
+#--------------------------------------------------
+# Main
+#--------------------------------------------------
+
+if( !defined( $ENV{EYEROBOT_TELNET} ) ) {
+    print "EYEROBOT_TELNET not defined with ip address";
+    exit(1);
+}
+
 print "Initializing...";
 init_components();
 center_robot();
@@ -47,19 +72,26 @@ sleep(1);
 $robot->drive_stop();
 sleep(1);
 
+#--------------------------------------------------
+# Methods
+#--------------------------------------------------
+
 sub move {
-    if( $state->{moveable} ) {
-        unless( $state->{action} eq 'MOVE_FORWARD' ) {
-            $state->{action} = 'MOVE_FORWARD';
+    if( $state->{state} == $STATES{MOVE} ) {
+        unless( $state->{action} == $ACTIONS{MOVE_FORWARD} ) {
+            $state->{action} = $ACTIONS{MOVE_FORWARD};
             $robot->drive_forward();
-            sleep(1);
+            sleep(0.2); # required
             warn "Moving...\n";
             $state->{last_movement_check} = [gettimeofday()];
         }
-    } else {
-        $robot->drive_stop();
-        $state->{action} = 'STOP';
-        warn "Stopped...\n";
+    } elsif( $state->{state} == $STATES{STOP} ) {
+        unless( $state->{action} == $ACTIONS{STOP} ) {
+            $state->{action} = $ACTIONS{STOP};
+            $robot->drive_stop();
+            sleep(0.15); # required
+            warn "Stopped...\n";
+        }
     }
 }
 
@@ -76,7 +108,6 @@ sub center_robot {
     }
 
     warn "Maintaining distance " . $state->{distance_to_wall} . " from wall\n";
-    $state->{moveable} = 1;
 }
 
 sub recenter_robot {
@@ -89,7 +120,7 @@ sub check_status {
     my $distance_travelled = $state->{distance_travelled_since_checkpoint};
 
     # Calculate forward distance travelled
-    if( $state->{action} eq 'MOVE_FORWARD' ) {
+    if( $state->{action} == $ACTIONS{MOVE_FORWARD} ) {
         my $new_time = [gettimeofday()];
         my $old_time = $state->{last_movement_check};
         my $diff_time = tv_interval($old_time, $new_time);
@@ -107,17 +138,16 @@ sub check_status {
             # major checkpoint
             $state->{checkpointed}++;
 
-            $state->{moveable} = 0;
-            $state->{action} = 'STOP';
+            $state->{state} = $STATES{STOP};
+            $state->{action} = $ACTIONS{CHECKPOINT};
             move();
-            sleep(1);
             if( system($checkpoint_script) ) {
                 die 'checkpoint script exited with error';
             }
         }
 
 
-        $state->{moveable} = 1;
+        $state->{state} = $STATES{MOVE};
 
         $state->{distance_to_checkpoint} = 1000 - ($state->{total_distance_travelled} % 1000);
 
@@ -155,7 +185,8 @@ sub init_components {
         Binmode => 1,
     );
     $sock->open();
-    sleep(2);
+    sleep(2); # wait for connection
+    # TODO: check connection
 
     my $oem_telnet = OEMModule3::Telnet->new(
         server_name => $ENV{EYEROBOT_TELNET},
@@ -186,15 +217,16 @@ sub init_components {
 
     $robot->start(1);
     sleep(1);
-    $robot->drive_stop();
-    sleep(1);
 
     $state->{total_distance_travelled} = 0;
     $state->{distance_travelled_since_checkpoint} = 0;
-    $state->{distance_to_checkpoint} = 1000;
+    $state->{distance_to_checkpoint} = 0;
     $state->{major_checkpoint} = 5000;
-    $state->{checkpointed} = 0;
-    $state->{action} = 'STOP';
+    $state->{checkpointed} = -1;
+
+    $state->{state} = $STATES{STOP};
+    $state->{action} = $ACTIONS{CHECKPOINT};
+    move();
 
     print "DONE!\n"
 }
