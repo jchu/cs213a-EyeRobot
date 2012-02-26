@@ -23,6 +23,7 @@ use SDLx::App;
 my $MAX_DISTANCE_SKEW   = 10; # mm
 my $DISTANCE_SKEW_LIMIT = 100; # mm
 my $FORWARD_SPEED       = 258; # mm/s
+my $DEFAULT_CHECKPOINT_DISTANCE = 5000;
 
 my %STATES = (
     STOP    => 0,
@@ -144,22 +145,17 @@ sub check_status {
         $state->{total_distance_travelled} += $distance_travelled;
         print "Checkpoint reached at " . $state->{total_distance_travelled} . "\n";
 
-        if( int($state->{total_distance_travelled} / $state->{major_checkpoint}) > $state->{checkpointed} ) {
-            # major checkpoint
-            $state->{checkpointed}++;
-
-            $state->{state} = $STATES{STOP};
-            $state->{action} = $ACTIONS{CHECKPOINT};
-            move();
-            if( system($checkpoint_script) ) {
-                die 'checkpoint script exited with error';
-            }
+        $state->{state} = $STATES{STOP};
+        $state->{action} = $ACTIONS{CHECKPOINT};
+        move();
+        if( system($checkpoint_script) ) {
+            warn 'checkpoint script exited with error';
+            quit_handler();
         }
-
 
         $state->{state} = $STATES{MOVE};
 
-        $state->{distance_to_checkpoint} = 1000 - ($state->{total_distance_travelled} % 1000);
+        $state->{distance_to_checkpoint} = $DEFAULT_CHECKPOINT_DISTANCE - ($state->{total_distance_travelled} % 1000);
 
         $state->{distance_travelled_since_checkpoint} = 0;
         $state->{last_movement_check} = [gettimeofday()];
@@ -231,8 +227,6 @@ sub init_components {
     $state->{total_distance_travelled} = 0;
     $state->{distance_travelled_since_checkpoint} = 0;
     $state->{distance_to_checkpoint} = 0;
-    $state->{major_checkpoint} = 5000;
-    $state->{checkpointed} = -1;
 
     $state->{state} = $STATES{STOP};
     $state->{action} = $ACTIONS{CHECKPOINT};
