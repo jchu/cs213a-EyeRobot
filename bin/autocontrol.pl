@@ -94,10 +94,13 @@ sub quit_handler {
 }
 
 sub move {
+    my $left_speed = $state->{speed}->[0];
+    my $right_speed = $state->{speed}->[1];
+
     if( $state->{state} == $STATES{TURN} ) {
         if( $state->{action} == $ACTIONS{MOVE0}
             || $state->{action} == $ACTIONS{MOVE1} ) {
-            $robot->drive_forward();
+            $robot->drive_forward($left_speed, $right_speed);
             sleep(0.2); # required
             warn "Moving...\n";
             $state->{last_movement_check} = [gettimeofday()];
@@ -110,7 +113,7 @@ sub move {
     } elsif( $state->{state} == $STATES{MOVE} ) {
         unless( $state->{action} == $ACTIONS{MOVE_FORWARD} ) {
             $state->{action} = $ACTIONS{MOVE_FORWARD};
-            $robot->drive_forward();
+            $robot->drive_forward($left_speed, $right_speed);
             sleep(0.2); # required
             warn "Moving...\n";
             $state->{last_movement_check} = [gettimeofday()];
@@ -138,9 +141,6 @@ sub center_robot {
     }
 
     warn "Maintaining distance " . $state->{distance_to_wall} . " from wall\n";
-}
-
-sub recenter_robot {
 }
 
 # default turn left
@@ -210,17 +210,27 @@ sub check_status {
         print $app->current_time . ": $dist\n";
 
         if( abs($state->{distance_to_wall} - $dist) > $MAX_DISTANCE_SKEW ) {
+            my $skew = $state->{distance_to_wall} - $dist;
+
             warn "Side distance skew detected. Need to autocorrect\n";
-            if( abs($state->{distance_to_wall} - $dist) > $DISTANCE_SKEW_LIMIT ) {
+            if( abs($skew) > $DISTANCE_SKEW_LIMIT ) {
                 warn "Drop off detected";
 
                 # Next checkpoint is a turn
                 $state->{distance_to_checkpoint} = $state->{distance_to_wall};
                 $state->{state} = $STATES{TURN};
                 $state->{action} = $ACTIONS{MOVE0};
+            } else {
+                if( $skew < 0 ) { # too close to wall
+                    $state->{speed} = [ $FORWARD_SPEED + 1, $FORWARD_SPEED ];
+                } else { # can be veering left or right
+                    $state->{speed} = [ $FORWARD_SPEED, $FORWARD_SPEED + 1 ];
+                }
             }
-        #    recenter_robot();
+        } else {
+            $state->{speed} = [ $FORWARD_SPEED, $FORWARD_SPEED ];
         }
+
     } else {
         warn "error: " . $oem->error() . "\n";
         warn "possible drop off detected\n";
@@ -276,6 +286,7 @@ sub init_components {
     $state->{total_distance_travelled} = 0;
     $state->{distance_travelled_since_checkpoint} = 0;
     $state->{distance_to_checkpoint} = 0;
+    $state->{speed} = [ $FORWARD_SPEED, $FORWARD_SPEED ];
 
     $state->{state} = $STATES{STOP};
     $state->{action} = $ACTIONS{CHECKPOINT};
