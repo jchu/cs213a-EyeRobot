@@ -77,12 +77,12 @@ $app->run();
 #--------------------------------------------------
 #
 sub quit_handler {
-    my $event       = shift;
-    my $controller  = shift;
+    my ($event, $app) = @_;
 
     return unless( $event->type == SDL_QUIT );
 
     warn 'Quitting application...';
+    $app->stop();
 
     $state->{state} = $STATES{STOP};
     $state->{action} = $ACTIONS{STOP};
@@ -90,7 +90,6 @@ sub quit_handler {
     sleep(1);
     $robot->drive_stop();
     sleep(1);
-    $controller->stop();
 }
 
 sub move {
