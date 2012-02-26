@@ -77,7 +77,7 @@ $app->run();
 #--------------------------------------------------
 #
 sub quit_handler {
-    my ($event, $app) = @_;
+    my $event = shift;
 
     return unless( $event->type == SDL_QUIT );
 
@@ -181,7 +181,12 @@ sub check_status {
         $app->stop();
         if( system($checkpoint_script) ) {
             warn 'checkpoint script exited with error';
-            quit_handler();
+
+            $oem->off();
+            sleep(1);
+            $robot->drive_stop();
+            sleep(1);
+            exit(1);
         }
 
         if( $state->{state} == $STATES{TURN} ) {
