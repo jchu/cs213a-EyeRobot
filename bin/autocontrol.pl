@@ -119,7 +119,6 @@ sub move {
                 warn "Moving...($left_speed,$right_speed)\n";
                 $state->{last_movement_check} = [gettimeofday()];
         } elsif( $state->{action} == $ACTIONS{TCHECKPOINT} ) {
-            $state->{action} = $ACTIONS{STOP};
             $robot->drive_stop();
             sleep(0.15); # required
             warn "Stopped...\n";
@@ -191,7 +190,12 @@ sub check_status {
         $state->{total_distance_travelled} += $distance_travelled;
         print "Checkpoint reached at " . $state->{total_distance_travelled} . "\n";
 
-        $state->{action} = $ACTIONS{CHECKPOINT};
+        if( $state->{state} == $STATES{TURN}
+            && $state->{action} == $ACTIONS{MOVE1} ) {
+            $state->{action} = $ACTIONS{TCHECKPOINT};
+        } else {
+            $state->{action} = $ACTIONS{CHECKPOINT};
+        }
         move();
 
         ##############
