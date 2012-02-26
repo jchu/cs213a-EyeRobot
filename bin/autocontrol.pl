@@ -15,7 +15,6 @@ use IRobot::Telnet;
 use SDL;
 use SDL::Event;
 use SDLx::App;
-use SDLx::Controller;
 
 #-------------------------------------------------
 # Variables
@@ -43,7 +42,8 @@ my $oem;
 my $robot;
 my $state;
 
-my $app = SDLx::Controller->new(
+$ENV{SDL_VIDEODRIVER} = 'dummy';
+my $app = SDLx::App->new(
     dt      => 0.001, # length movement step in seconds
     min_t   => 0,
     delay   => 0, # milleseconds between loops
