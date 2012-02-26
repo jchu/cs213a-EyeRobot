@@ -84,6 +84,8 @@ sub quit_handler {
 
     warn 'Quitting application...';
 
+    $state->{state} = $STATES{STOP};
+    $state->{action} = $ACTIONS{STOP};
     $oem->off();
     sleep(1);
     $robot->drive_stop();
@@ -154,7 +156,9 @@ sub check_status {
     my $distance_travelled = $state->{distance_travelled_since_checkpoint};
 
     # Calculate forward distance travelled
-    if( $state->{action} == $ACTIONS{MOVE_FORWARD} ) {
+    if( $state->{action} == $ACTIONS{MOVE_FORWARD}
+        || $state->{action} == $ACTIONS{MOVE0}
+        || $state->{action} == $ACTIONS{MOVE1} ) {
         my $new_time = [gettimeofday()];
         my $old_time = $state->{last_movement_check};
         my $diff_time = tv_interval($old_time, $new_time);
