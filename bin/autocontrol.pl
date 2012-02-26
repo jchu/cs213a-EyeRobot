@@ -20,10 +20,11 @@ use SDLx::App;
 # Variables
 #-------------------------------------------------
 
-my $MAX_DISTANCE_SKEW   = 10; # mm
+my $MAX_DISTANCE_SKEW   = 30; # mm
 my $DISTANCE_SKEW_LIMIT = 100; # mm
 my $FORWARD_SPEED       = 258; # mm/s
-my $DEFAULT_CHECKPOINT_DISTANCE = 5000;
+my $VEER_OFFSET         = 50;
+my $DEFAULT_CHECKPOINT_DISTANCE = 1000;
 
 my %STATES = (
     STOP    => 0,
@@ -34,9 +35,13 @@ my %STATES = (
 my %ACTIONS = (
     STOP            => 0,
     MOVE_FORWARD    => 1,
-    CHECKPOINT      => 2,
-    MOVE0           => 3,
-    MOVE1           => 4
+    VEER            => 2,
+    CHECKPOINT      => 3,
+    TCHECKPOINT     => 4,
+    MOVE0           => 5,
+    MOVE1           => 6,
+    MOVE_0          => 7,
+    MOVE_1          => 8
 );
 
 my $checkpoint_script = '/bin/sh checkpoint_script.sh';
@@ -47,8 +52,8 @@ my $state;
 
 $ENV{SDL_VIDEODRIVER} = 'dummy';
 my $app = SDLx::App->new(
-    dt      => 0.001, # length movement step in seconds
-    min_t   => 0,
+    dt      => 0.1, # length movement step in seconds
+    min_t   => 0.1,
     delay   => 0, # milleseconds between loops
 );
 
@@ -79,6 +84,7 @@ $app->run();
 sub quit_handler {
     my $event = shift;
 
+    warn 'Found event: ' . $event->type . "\n";
     return unless( $event->type == SDL_QUIT );
 
     warn 'Quitting application...';
@@ -90,39 +96,50 @@ sub quit_handler {
     sleep(1);
     $robot->drive_stop();
     sleep(1);
+    exit(1);
 }
 
 sub move {
     my $left_speed = $state->{speed}->[0];
     my $right_speed = $state->{speed}->[1];
 
-    if( $state->{state} == $STATES{TURN} ) {
-        if( $state->{action} == $ACTIONS{MOVE0}
-            || $state->{action} == $ACTIONS{MOVE1} ) {
-            $robot->drive_forward($left_speed, $right_speed);
-            sleep(0.2); # required
-            warn "Moving...\n";
-            $state->{last_movement_check} = [gettimeofday()];
-        } elsif( $state->{action} == $ACTIONS{CHECKPOINT} ) {
-            $state->{action} = $ACTIONS{STOP};
-            $robot->drive_stop();
-            sleep(0.15); # required
-            warn "Stopped...\n";
-        }
-    } elsif( $state->{state} == $STATES{MOVE} ) {
-        unless( $state->{action} == $ACTIONS{MOVE_FORWARD} ) {
-            $state->{action} = $ACTIONS{MOVE_FORWARD};
-            $robot->drive_forward($left_speed, $right_speed);
-            sleep(0.2); # required
-            warn "Moving...\n";
-            $state->{last_movement_check} = [gettimeofday()];
-        }
-    } elsif( $state->{state} == $STATES{STOP} ) {
+    if( $state->{state} == $STATES{STOP}
+        || $state->{action} == $ACTIONS{CHECKPOINT} ) {
         unless( $state->{action} == $ACTIONS{STOP} ) {
             $state->{action} = $ACTIONS{STOP};
             $robot->drive_stop();
             sleep(0.15); # required
             warn "Stopped...\n";
+        }
+    } elsif( $state->{state} == $STATES{TURN} ) {
+        if( $state->{action} == $ACTIONS{MOVE_0}
+            || $state->{action} == $ACTIONS{MOVE_1} ) {
+                $robot->drive_forward($left_speed, $right_speed);
+                sleep(0.3); # required
+                warn "Moving...($left_speed,$right_speed)\n";
+                $state->{last_movement_check} = [gettimeofday()];
+        } elsif( $state->{action} == $ACTIONS{TCHECKPOINT} ) {
+            $state->{action} = $ACTIONS{STOP};
+            $robot->drive_stop();
+            sleep(0.15); # required
+            warn "Stopped...\n";
+        }
+        $state->{action} = $ACTIONS{MOVE0} if $state->{action} == $ACTIONS{MOVE_0};
+        $state->{action} = $ACTIONS{MOVE1} if $state->{action} == $ACTIONS{MOVE_1};
+    } elsif( $state->{state} == $STATES{MOVE} ) {
+        if( $state->{action} == $ACTIONS{VEER} ) {
+            $state->{action} = $ACTIONS{MOVE_FORWARD};
+            $robot->drive_forward($left_speed, $right_speed);
+            sleep(1); # required
+            warn "Moving...($left_speed,$right_speed)\n";
+        }
+
+        unless( $state->{action} == $ACTIONS{MOVE_FORWARD} ) {
+            $state->{action} = $ACTIONS{MOVE_FORWARD};
+            $robot->drive_forward($left_speed, $right_speed);
+            sleep(1); # required
+            warn "Moving...($left_speed,$right_speed)\n";
+            $state->{last_movement_check} = [gettimeofday()];
         }
     }
 }
@@ -144,8 +161,11 @@ sub center_robot {
 
 # default turn left
 sub turn_robot {
-    $robot->turn_left();
+    warn "Turning";
+    $robot->spin_left();
     sleep(2.35); # quarter turn
+    $robot->drive_stop();
+    sleep(0.15);
 }
 
 
@@ -171,9 +191,6 @@ sub check_status {
         $state->{total_distance_travelled} += $distance_travelled;
         print "Checkpoint reached at " . $state->{total_distance_travelled} . "\n";
 
-        unless( $state->{state} == $STATES{TURN} ) {
-            $state->{state} = $STATES{STOP};
-        }
         $state->{action} = $ACTIONS{CHECKPOINT};
         move();
 
@@ -190,9 +207,14 @@ sub check_status {
         }
 
         if( $state->{state} == $STATES{TURN} ) {
-            turn_robot();
-            $state->{action} = $ACTIONS{MOVE1};
-            $state->{distance_to_checkpoint} = $state->{distance_to_wall};
+            if( $state->{action} == $ACTIONS{TCHECKPOINT} ) {
+                $state->{state} = $STATES{MOVE};
+                $state->{distance_to_checkpoint} = $DEFAULT_CHECKPOINT_DISTANCE - ($state->{total_distance_travelled} % 1000);
+            } else {
+                turn_robot();
+                $state->{action} = $ACTIONS{MOVE_1};
+                $state->{distance_to_checkpoint} = $state->{distance_to_wall};
+            }
         } else {
             $state->{state} = $STATES{MOVE};
             $state->{distance_to_checkpoint} = $DEFAULT_CHECKPOINT_DISTANCE - ($state->{total_distance_travelled} % 1000);
@@ -205,6 +227,8 @@ sub check_status {
         ##############
 
     }
+
+    return if( $state->{state} == $STATES{TURN} );
 
     # Check sensors
     #
@@ -222,14 +246,17 @@ sub check_status {
 
                 # Next checkpoint is a turn
                 $state->{distance_to_checkpoint} = $state->{distance_to_wall};
+                $state->{distance_travelled_since_checkpoint} = 0;
+                $state->{last_movement_check} = [gettimeofday()];
                 $state->{state} = $STATES{TURN};
-                $state->{action} = $ACTIONS{MOVE0};
+                $state->{action} = $ACTIONS{MOVE_0};
             } else {
                 if( $skew < 0 ) { # too close to wall
-                    $state->{speed} = [ $FORWARD_SPEED + 1, $FORWARD_SPEED ];
+                    $state->{speed} = [ $FORWARD_SPEED + $VEER_OFFSET, $FORWARD_SPEED ];
                 } else { # can be veering left or right
-                    $state->{speed} = [ $FORWARD_SPEED, $FORWARD_SPEED + 1 ];
+                    $state->{speed} = [ $FORWARD_SPEED, $FORWARD_SPEED + $VEER_OFFSET ];
                 }
+                $state->{action} = $ACTIONS{VEER};
             }
         } else {
             $state->{speed} = [ $FORWARD_SPEED, $FORWARD_SPEED ];
@@ -240,8 +267,10 @@ sub check_status {
         warn "possible drop off detected\n";
 
         $state->{distance_to_checkpoint} = $state->{distance_to_wall};
+        $state->{distance_travelled_since_checkpoint} = 0;
+        $state->{last_movement_check} = [gettimeofday()];
         $state->{state} = $STATES{TURN};
-        $state->{action} = $ACTIONS{MOVE0};
+        $state->{action} = $ACTIONS{MOVE_0};
     }
 
     # Determine status
