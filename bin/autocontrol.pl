@@ -51,6 +51,7 @@ my $app = SDLx::App->new(
 
 $app->add_move_handler(\&check_status);
 $app->add_move_handler(\&move);
+$app->add_event_handler(\&quit_handler);
 
 #--------------------------------------------------
 # Main
@@ -67,14 +68,23 @@ center_robot();
 
 $app->run();
 
-$oem->off();
-sleep(1);
-$robot->drive_stop();
-sleep(1);
 
 #--------------------------------------------------
 # Methods
 #--------------------------------------------------
+#
+sub quit_handler {
+    my $event       = shift;
+    my $controller  = shift;
+
+    return unless( $event->type == SDL_QUIT );
+
+    $oem->off();
+    sleep(1);
+    $robot->drive_stop();
+    sleep(1);
+    $controller->stop();
+}
 
 sub move {
     if( $state->{state} == $STATES{MOVE} ) {
