@@ -52,9 +52,9 @@ my $app = SDLx::App->new(
     delay   => 0, # milleseconds between loops
 );
 
+$app->add_event_handler(\&quit_handler);
 $app->add_move_handler(\&check_status);
 $app->add_move_handler(\&move);
-$app->add_event_handler(\&quit_handler);
 
 #--------------------------------------------------
 # Main
@@ -81,6 +81,8 @@ sub quit_handler {
     my $controller  = shift;
 
     return unless( $event->type == SDL_QUIT );
+
+    warn 'Quitting application...';
 
     $oem->off();
     sleep(1);
