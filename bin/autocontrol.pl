@@ -142,7 +142,7 @@ sub recenter_robot {
 # default turn left
 sub turn_robot {
     $robot->turn_left();
-    sleep(4.45); # quarter turn
+    sleep(2.35); # quarter turn
 }
 
 
