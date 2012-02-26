@@ -34,7 +34,9 @@ my %STATES = (
 my %ACTIONS = (
     STOP            => 0,
     MOVE_FORWARD    => 1,
-    CHECKPOINT      => 2
+    CHECKPOINT      => 2,
+    MOVE0           => 3,
+    MOVE1           => 4
 );
 
 my $checkpoint_script = '/bin/sh checkpoint_script.sh';
@@ -88,7 +90,20 @@ sub quit_handler {
 }
 
 sub move {
-    if( $state->{state} == $STATES{MOVE} ) {
+    if( $state->{state} == $STATES{TURN} ) {
+        if( $state->{action} == $ACTIONS{MOVE0}
+            || $state->{action} == $ACTIONS{MOVE1} ) {
+            $robot->drive_forward();
+            sleep(0.2); # required
+            warn "Moving...\n";
+            $state->{last_movement_check} = [gettimeofday()];
+        } elsif( $state->{action} == $ACTIONS{CHECKPOINT} ) {
+            $state->{action} = $ACTIONS{STOP};
+            $robot->drive_stop();
+            sleep(0.15); # required
+            warn "Stopped...\n";
+        }
+    } elsif( $state->{state} == $STATES{MOVE} ) {
         unless( $state->{action} == $ACTIONS{MOVE_FORWARD} ) {
             $state->{action} = $ACTIONS{MOVE_FORWARD};
             $robot->drive_forward();
@@ -124,6 +139,12 @@ sub center_robot {
 sub recenter_robot {
 }
 
+# default turn left
+sub turn_robot {
+    $robot->turn_left();
+    sleep(4.45); # quarter turn
+}
+
 
 sub check_status {
     warn Dumper($state);
@@ -145,20 +166,34 @@ sub check_status {
         $state->{total_distance_travelled} += $distance_travelled;
         print "Checkpoint reached at " . $state->{total_distance_travelled} . "\n";
 
-        $state->{state} = $STATES{STOP};
+        unless( $state->{state} == $STATES{TURN} ) {
+            $state->{state} = $STATES{STOP};
+        }
         $state->{action} = $ACTIONS{CHECKPOINT};
         move();
+
+        ##############
+        $app->stop();
         if( system($checkpoint_script) ) {
             warn 'checkpoint script exited with error';
             quit_handler();
         }
 
-        $state->{state} = $STATES{MOVE};
-
-        $state->{distance_to_checkpoint} = $DEFAULT_CHECKPOINT_DISTANCE - ($state->{total_distance_travelled} % 1000);
+        if( $state->{state} == $STATES{TURN} ) {
+            turn_robot();
+            $state->{action} = $ACTIONS{MOVE1};
+            $state->{distance_to_checkpoint} = $state->{distance_to_wall};
+        } else {
+            $state->{state} = $STATES{MOVE};
+            $state->{distance_to_checkpoint} = $DEFAULT_CHECKPOINT_DISTANCE - ($state->{total_distance_travelled} % 1000);
+        }
 
         $state->{distance_travelled_since_checkpoint} = 0;
         $state->{last_movement_check} = [gettimeofday()];
+
+        $app->run();
+        ##############
+
     }
 
     # Check sensors
@@ -172,13 +207,21 @@ sub check_status {
             warn "Side distance skew detected. Need to autocorrect\n";
             if( abs($state->{distance_to_wall} - $dist) > $DISTANCE_SKEW_LIMIT ) {
                 warn "Drop off detected";
-                # turn_left();
-        #    recenter_robot();
+
+                # Next checkpoint is a turn
+                $state->{distance_to_checkpoint} = $state->{distance_to_wall};
+                $state->{state} = $STATES{TURN};
+                $state->{action} = $ACTIONS{MOVE0};
             }
+        #    recenter_robot();
         }
     } else {
         warn "error: " . $oem->error() . "\n";
         warn "possible drop off detected\n";
+
+        $state->{distance_to_checkpoint} = $state->{distance_to_wall};
+        $state->{state} = $STATES{TURN};
+        $state->{action} = $ACTIONS{MOVE0};
     }
 
     # Determine status
