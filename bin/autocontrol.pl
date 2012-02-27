@@ -6,6 +6,7 @@ use warnings;
 use Net::Telnet;
 use Time::HiRes qw(gettimeofday tv_interval nanosleep);
 use Data::Dumper::Concise;
+use Try::Tiny;
 
 use OEMModule3;
 use OEMModule3::Telnet;
@@ -20,8 +21,8 @@ use SDLx::App;
 # Variables
 #-------------------------------------------------
 
-my $MAX_DISTANCE_SKEW   = 30; # mm
-my $DISTANCE_SKEW_LIMIT = 100; # mm
+my $MAX_DISTANCE_SKEW   = 100; # mm
+my $DISTANCE_SKEW_LIMIT = 1000; # mm
 my $FORWARD_SPEED       = 258; # mm/s
 my $VEER_OFFSET         = 50;
 my $DEFAULT_CHECKPOINT_DISTANCE = 1000;
@@ -214,10 +215,12 @@ sub check_status {
         if( $state->{state} == $STATES{TURN} ) {
             if( $state->{action} == $ACTIONS{TCHECKPOINT} ) {
                 $state->{state} = $STATES{MOVE};
+                $state->{speed} = [ $FORWARD_SPEED, $FORWARD_SPEED ];
                 $state->{distance_to_checkpoint} = $DEFAULT_CHECKPOINT_DISTANCE;
             } else {
                 turn_robot();
                 $state->{action} = $ACTIONS{MOVE_1};
+                $state->{speed} = [ $FORWARD_SPEED, $FORWARD_SPEED ];
                 $state->{distance_to_checkpoint} = $state->{distance_to_wall};
             }
         } else {
@@ -237,14 +240,26 @@ sub check_status {
     # Check sensors
     #
     # if error or distance exceed, reached a drop off and need to turn
-    my $dist = $oem->measure_distance();
+
+    my $dist;
+    try {
+        $dist = $oem->measure_distance();
+    } catch {
+        warn "error: " . $oem->error() . "\n";
+        $oem->off();
+        sleep(1);
+        $robot->drive_stop();
+        sleep(1);
+        exit(1);
+    };
     if ($dist) {
         print $app->current_time . ": $dist\n";
 
-        if( abs($state->{distance_to_wall} - $dist) > $MAX_DISTANCE_SKEW ) {
-            my $skew = $state->{distance_to_wall} - $dist;
-
+        my $skew = $dist - $state->{distance_to_wall};
+        if( abs($skew) > $MAX_DISTANCE_SKEW ) {
             warn "Side distance skew detected. Need to autocorrect\n";
+
+
             if( abs($skew) > $DISTANCE_SKEW_LIMIT ) {
                 warn "Drop off detected";
 
@@ -255,10 +270,10 @@ sub check_status {
                 $state->{action} = $ACTIONS{MOVE_0};
             } else {
                 if( $skew < 0 ) { # too close to wall
-                    warn "veering right";
+                    warn "veering right ($skew)";
                     $state->{speed} = [ $FORWARD_SPEED + $VEER_OFFSET, $FORWARD_SPEED ];
                 } else { # can be veering left or right
-                    warn "veering left";
+                    warn "veering left ($skew)";
                     $state->{speed} = [ $FORWARD_SPEED, $FORWARD_SPEED + $VEER_OFFSET ];
                 }
                 $state->{action} = $ACTIONS{VEER};
