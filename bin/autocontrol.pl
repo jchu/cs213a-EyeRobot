@@ -21,10 +21,11 @@ use SDLx::App;
 # Variables
 #-------------------------------------------------
 
-my $MAX_DISTANCE_SKEW   = 100; # mm
-my $DISTANCE_SKEW_LIMIT = 1000; # mm
+my $MAX_DISTANCE_SKEW   = 50; # mm
+my $DISTANCE_SKEW_LIMIT = 600; # mm
+my $DISTANCE_LIMIT      = 2300;
 my $FORWARD_SPEED       = 258; # mm/s
-my $VEER_OFFSET         = 50;
+my $VEER_OFFSET         = 30;
 my $DEFAULT_CHECKPOINT_DISTANCE = 1000;
 
 my %STATES = (
@@ -36,13 +37,12 @@ my %STATES = (
 my %ACTIONS = (
     STOP            => 0,
     MOVE_FORWARD    => 1,
-    VEER            => 2,
-    CHECKPOINT      => 3,
-    TCHECKPOINT     => 4,
-    MOVE0           => 5,
-    MOVE1           => 6,
-    MOVE_0          => 7,
-    MOVE_1          => 8
+    CHECKPOINT      => 2,
+    TCHECKPOINT     => 3,
+    MOVE0           => 4,
+    MOVE1           => 5,
+    MOVE_0          => 6,
+    MOVE_1          => 7
 );
 
 my $checkpoint_script = '/bin/sh checkpoint_script.sh';
@@ -53,8 +53,8 @@ my $state;
 
 $ENV{SDL_VIDEODRIVER} = 'dummy';
 my $app = SDLx::App->new(
-    dt      => 0.1, # length movement step in seconds
-    min_t   => 0.1,
+    dt      => 0.4, # length movement step in seconds
+    min_t   => 0.3,
     delay   => 0, # milleseconds between loops
 );
 
@@ -127,12 +127,23 @@ sub move {
         $state->{action} = $ACTIONS{MOVE0} if $state->{action} == $ACTIONS{MOVE_0};
         $state->{action} = $ACTIONS{MOVE1} if $state->{action} == $ACTIONS{MOVE_1};
     } elsif( $state->{state} == $STATES{MOVE} ) {
-        if( $state->{action} == $ACTIONS{VEER} ) {
+        if( $state->{veering} ) {
+            if( abs($state->{veering}) > 1 ) {
+                warn "stop veering!";
+                $state->{veering} = 0;
+                $state->{speed} = [ $FORWARD_SPEED, $FORWARD_SPEED ];
+            } elsif( $state->{veering} > 0 ) {
+                $state->{veering}++;
+            } else {
+                $state->{veering}--;
+            }
             $state->{action} = $ACTIONS{MOVE_FORWARD};
             warn "Moving...($left_speed,$right_speed)\n";
             $robot->drive_forward($left_speed, $right_speed);
             sleep(1); # required
             $state->{last_movement_check}->[0]++;
+        } else {
+            $state->{veering} = 0;
         }
 
         unless( $state->{action} == $ACTIONS{MOVE_FORWARD} ) {
@@ -171,7 +182,7 @@ sub turn_robot {
 
 
 sub check_status {
-    warn Dumper($state);
+    #warn Dumper($state);
 
     my $distance_travelled = 0;
 
@@ -221,7 +232,7 @@ sub check_status {
                 turn_robot();
                 $state->{action} = $ACTIONS{MOVE_1};
                 $state->{speed} = [ $FORWARD_SPEED, $FORWARD_SPEED ];
-                $state->{distance_to_checkpoint} = $state->{distance_to_wall};
+                $state->{distance_to_checkpoint} = $state->{distance_to_wall} + 2 * $MAX_DISTANCE_SKEW;
             }
         } else {
             $state->{state} = $STATES{MOVE};
@@ -245,7 +256,7 @@ sub check_status {
     try {
         $dist = $oem->measure_distance();
     } catch {
-        warn "error: " . $oem->error() . "\n";
+        warn "error on oem measure\n";
         $oem->off();
         sleep(1);
         $robot->drive_stop();
@@ -257,39 +268,43 @@ sub check_status {
 
         my $skew = $dist - $state->{distance_to_wall};
         if( abs($skew) > $MAX_DISTANCE_SKEW ) {
-            warn "Side distance skew detected. Need to autocorrect\n";
+            warn "Side distance skew detected ($skew). Need to autocorrect\n";
 
 
-            if( abs($skew) > $DISTANCE_SKEW_LIMIT ) {
+            if( abs($skew) > $DISTANCE_SKEW_LIMIT || $dist > $DISTANCE_LIMIT ) {
                 warn "Drop off detected";
 
                 # Next checkpoint is a turn
-                $state->{distance_to_checkpoint} = $state->{distance_to_wall};
+                $state->{distance_to_checkpoint} = $state->{distance_to_wall} - 3 * $MAX_DISTANCE_SKEW;
                 $state->{last_movement_check} = [gettimeofday()];
                 $state->{state} = $STATES{TURN};
                 $state->{action} = $ACTIONS{MOVE_0};
             } else {
-                if( $skew < 0 ) { # too close to wall
+                my $vmult = int(($skew + $MAX_DISTANCE_SKEW) / 200);
+                $vmult = $vmult? $vmult: 1;
+                if( $skew < 0 && $state->{veering} <= 0 ) { # too close to wall
                     warn "veering right ($skew)";
-                    $state->{speed} = [ $FORWARD_SPEED + $VEER_OFFSET, $FORWARD_SPEED ];
-                } else { # can be veering left or right
+                    $state->{speed} = [ $FORWARD_SPEED + ($vmult * $VEER_OFFSET), $FORWARD_SPEED ];
+                    $state->{veering} = 1;
+                } elsif( $state->{veering} >= 0 ){ # can be veering left or right
                     warn "veering left ($skew)";
-                    $state->{speed} = [ $FORWARD_SPEED, $FORWARD_SPEED + $VEER_OFFSET ];
+                    $state->{speed} = [ $FORWARD_SPEED, $FORWARD_SPEED + ($vmult * $VEER_OFFSET) ];
+                    $state->{veering} = -1;
                 }
-                $state->{action} = $ACTIONS{VEER};
             }
         } else {
             $state->{speed} = [ $FORWARD_SPEED, $FORWARD_SPEED ];
+            $state->{veering} = 0;
         }
 
     } else {
-        warn "error: " . $oem->error() . "\n";
-        warn "possible drop off detected\n";
+        warn "error something happened: " . $oem->error() . "\n";
+        # either too close or bad reflection
+        warn "veering right";
+        $state->{speed} = [ $FORWARD_SPEED + $VEER_OFFSET, $FORWARD_SPEED ];
+        $state->{veering} = 1;
 
-        $state->{distance_to_checkpoint} = $state->{distance_to_wall};
-        $state->{last_movement_check} = [gettimeofday()];
-        $state->{state} = $STATES{TURN};
-        $state->{action} = $ACTIONS{MOVE_0};
+
     }
 
     # Determine status
@@ -338,6 +353,7 @@ sub init_components {
     $state->{total_distance_travelled} = 0;
     $state->{distance_to_checkpoint} = 0;
     $state->{speed} = [ $FORWARD_SPEED, $FORWARD_SPEED ];
+    $state->{veering} = 0;
 
     $state->{state} = $STATES{STOP};
     $state->{action} = $ACTIONS{CHECKPOINT};
