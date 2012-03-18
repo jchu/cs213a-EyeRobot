@@ -1,0 +1,14 @@
+#!/bin/sh
+
+PYTHON2=/usr/bin/python2
+CAMERA=/tmp/camera/camera.py
+IMAGESTITCH=/tmp/camera/ImageStitch
+
+TEMPPATH=`/usr/bin/mktemp -d`
+
+PANORAMA=/tmp/camera/panorama
+IMG=`ls -l /tmp/panorama | tail -n 1 | awk '{print $2; }'`
+
+${PYTHON2} ${CAMERA} ${TEMPPATH}
+
+${IMAGESTITCH} ${TEMPPATH} ${PANORAMA}/${IMG}.png
